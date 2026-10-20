@@ -2,6 +2,7 @@ import { CalendarClock, FileSpreadsheet, Lock, MessageCircle, Send, ShieldCheck 
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
+import { Footer } from "@/components/footer";
 import { Logo, LogoMark } from "@/components/logo";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
@@ -55,7 +56,7 @@ export default async function Home() {
         </div>
 
         {/* static preview of the conversation */}
-        <div className="mx-auto w-full max-w-md rounded-3xl border bg-card/90 p-4 shadow-xl backdrop-blur">
+        <div id="preview" className="mx-auto w-full max-w-md scroll-mt-8 rounded-3xl border bg-card/90 p-4 shadow-xl backdrop-blur">
           <div className="mb-3 flex items-center gap-2 border-b pb-3">
             <LogoMark className="size-7 rounded-lg" />
             <div className="text-sm font-medium">Qorlog AI</div>
@@ -83,7 +84,7 @@ export default async function Home() {
         </div>
       </section>
 
-      <section className="mx-auto grid max-w-6xl gap-4 px-5 pb-24 sm:grid-cols-2 lg:grid-cols-3">
+      <section id="features" className="mx-auto grid max-w-6xl scroll-mt-8 gap-4 px-5 pb-24 sm:grid-cols-2 lg:grid-cols-3">
         {FEATURES.map(({ icon: Icon, title, body }) => (
           <div key={title} className="rounded-2xl border bg-card/80 p-5 backdrop-blur transition-shadow hover:shadow-md">
             <span className="grid size-10 place-items-center rounded-xl bg-primary/10 text-primary">
@@ -94,6 +95,8 @@ export default async function Home() {
           </div>
         ))}
       </section>
+
+      <Footer />
     </div>
   );
 }
