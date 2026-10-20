@@ -14,12 +14,18 @@ export interface Report {
 
 export function totals(entries: EntryRow[]) {
   const hours = entries.reduce((a, e) => a + (e.hours ?? 0), 0);
-  const leave = entries.reduce((a, e) => {
-    const t = `${e.leave ?? ""} ${e.tasks ?? ""} ${e.notes ?? ""}`.toLowerCase();
-    if (!t.includes("leave")) return a;
-    return a + (t.includes("half") ? 0.5 : 1);
-  }, 0);
-  return { hours: Math.round(hours * 100) / 100, leaveDays: leave, days: new Set(entries.map((e) => e.date)).size };
+  // one value per date (a task-per-row sheet repeats dates), taken from the leave classification
+  const perDate = new Map<string, number>();
+  for (const e of entries) perDate.set(e.date, Math.max(perDate.get(e.date) ?? 0, e.leaveDays));
+  const leaveDates = [...perDate].filter(([, d]) => d > 0).sort(([a], [b]) => a.localeCompare(b));
+  return {
+    hours: Math.round(hours * 100) / 100,
+    leaveDays: leaveDates.reduce((a, [, d]) => a + d, 0),
+    fullLeaveDays: leaveDates.filter(([, d]) => d >= 1).length,
+    halfLeaveDays: leaveDates.filter(([, d]) => d > 0 && d < 1).length,
+    leaveDates: leaveDates.map(([date, d]) => `${date}${d < 1 ? " (half)" : ""}`),
+    days: perDate.size,
+  };
 }
 
 const notesOf = (e: EntryRow) => [e.leave, e.notes].filter(Boolean).join(" | ");

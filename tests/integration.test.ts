@@ -32,7 +32,7 @@ import { __useDbForTests, db } from "../lib/db";
 import { readEntries } from "../lib/sheets/ops";
 import { handleUpdate } from "../lib/telegram/handler";
 import { runReminders } from "../lib/telegram/reminders";
-import { localParts } from "../lib/time";
+import { addDays, localParts } from "../lib/time";
 import { openBytes } from "../lib/vault";
 
 // ---- test doubles -----------------------------------------------------------------------------
@@ -99,16 +99,18 @@ const PROFILE_JSON = {
     {
       name: "Timesheet", role: "entry", layout: "row_per_day", headerRow: 1, firstDataRow: 2, dateFormat: "DD/MM/YYYY",
       columns: [
-        { col: 1, header: "Date", meaning: "date" },
-        { col: 2, header: "Hours", meaning: "hours" },
-        { col: 3, header: "Tasks", meaning: "tasks" },
+        { col: 1, header: "Date", description: "Day of the entry", meaning: "date" },
+        { col: 2, header: "Hours", description: "Hours worked", meaning: "hours" },
+        { col: 3, header: "Tasks", description: "What was done", meaning: "tasks" },
       ],
       notes: null,
     },
   ],
   leaveConvention: null,
+  leaveMarkers: [],
   warnings: [],
   confidence: "high",
+  version: 2,
 };
 
 const exec = (tool: unknown, input: object) =>
@@ -210,7 +212,7 @@ test("agent tools: leave keeps tasks, export is owner-only, other users are lock
   const t = createTools({ userId: alice.id, userName: alice.name, channel: "web", timezone: alice.timezone, files });
 
   const leave = await exec(t.mark_leave, { date: today, type: "half", hours: 4 });
-  assert.equal(leave.ok, true);
+  assert.equal(leave.ok, true, JSON.stringify(leave));
   const rows = await readEntries(await loadAdapter(alice.id, (await getTimesheet(alice.id, "Acme Corp"))!), (await loadProfile(alice.id, aliceTs))!, { from: today, to: today });
   assert.equal(rows[0].hours, 4);
   assert.match(rows[0].tasks!, /Half day leave/);
@@ -397,4 +399,41 @@ test("telegram webhook self-setup: sets once, is idempotent, derives a secret", 
   } finally {
     globalThis.fetch = realFetch;
   }
+});
+
+test("parallel writes to one timesheet all land, and summarize_period counts leave exactly", async () => {
+  const { createTools } = await import("../lib/agent/tools");
+  const t = createTools({ userId: alice.id, userName: alice.name, channel: "web", timezone: alice.timezone, files: [] });
+  const d1 = addDays(today, -12);
+  const d2 = addDays(today, -11);
+  const d3 = addDays(today, -10);
+  // the model often emits several tool calls in one step: they must not overwrite each other
+  const results = await Promise.all([
+    exec(t.set_day_entry, { date: d1, hours: 5, tasks: [{ description: "Parallel A" }] }),
+    exec(t.mark_leave, { date: d2, type: "full" }),
+    exec(t.mark_leave, { date: d3, type: "half", hours: 4 }),
+  ]);
+  for (const r of results) assert.equal(r.ok, true, JSON.stringify(r));
+  assert.ok(results.every((r) => r.verified === true));
+
+  const rows = await readEntries(await loadAdapter(alice.id, (await getTimesheet(alice.id, "Acme Corp"))!), (await loadProfile(alice.id, aliceTs))!, { from: d1, to: d3 });
+  assert.deepEqual(rows.map((r) => r.date), [d1, d2, d3]);
+
+  const sum = await exec(t.summarize_period, { from: d1, to: d3 });
+  assert.equal(sum.ok, true, JSON.stringify(sum));
+  assert.equal(sum.leaveDays, 1.5);
+  assert.equal(sum.fullLeaveDays, 1);
+  assert.equal(sum.halfLeaveDays, 1);
+
+  const bad = await exec(t.write_cells, { sheet: "Timesheet", cells: [{ row: 1, col: 1, value: "=SUM(A1)" }] });
+  assert.equal(bad.ok, false);
+});
+
+test("a reply that produced a file keeps its download card after reload", async () => {
+  const { saveMessage } = await import("../lib/data/messages");
+  const id = "123e4567-e89b-12d3-a456-426614174000";
+  await saveMessage(alice.id, "web", "assistant", "Here is your PDF.", [{ id, filename: "acme_2026-10.pdf" }]);
+  const last = (await recentMessages(alice.id, 1))[0];
+  assert.equal(last.text, "Here is your PDF.");
+  assert.deepEqual(last.files, [{ id, filename: "acme_2026-10.pdf" }]);
 });

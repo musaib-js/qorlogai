@@ -3,6 +3,7 @@ import ExcelJS from "exceljs";
 
 import type { Cell, CellWrite, ReadOpts, SheetAdapter, SheetInfo } from "./types";
 import { SheetError } from "./types";
+import { resolveSheetName } from "./names";
 
 /**
  * Google Sheets access uses ONE service account owned by Qorlog (env GOOGLE_SERVICE_ACCOUNT_JSON).
@@ -82,7 +83,15 @@ export class GoogleSheetAdapter implements SheetAdapter {
   readonly kind = "gsheet" as const;
   private api = client();
 
+  private names: string[] | null = null;
+
   constructor(private spreadsheetId: string) {}
+
+  /** Accepts "November 26" for a tab called "Nov-26". */
+  private async tab(sheet: string): Promise<string> {
+    this.names ??= (await this.listSheets()).map((s) => s.name);
+    return resolveSheetName(this.names, sheet);
+  }
 
   async listSheets(): Promise<SheetInfo[]> {
     try {
@@ -100,7 +109,8 @@ export class GoogleSheetAdapter implements SheetAdapter {
     }
   }
 
-  async read(sheet: string, opts: ReadOpts = {}): Promise<Cell[][]> {
+  async read(sheetName: string, opts: ReadOpts = {}): Promise<Cell[][]> {
+    const sheet = await this.tab(sheetName);
     const start = Math.max(1, opts.startRow ?? 1);
     const end = start + (opts.maxRows ?? 200) - 1;
     const lastCol = colLetter(opts.maxCols ?? 40);
@@ -117,8 +127,9 @@ export class GoogleSheetAdapter implements SheetAdapter {
     }
   }
 
-  async write(sheet: string, cells: CellWrite[]): Promise<void> {
+  async write(sheetName: string, cells: CellWrite[]): Promise<void> {
     if (!cells.length) return;
+    const sheet = await this.tab(sheetName);
     try {
       await this.api.spreadsheets.values.batchUpdate({
         spreadsheetId: this.spreadsheetId,
@@ -135,7 +146,8 @@ export class GoogleSheetAdapter implements SheetAdapter {
     }
   }
 
-  async appendRow(sheet: string, values: (Cell | Date)[]): Promise<number> {
+  async appendRow(sheetName: string, values: (Cell | Date)[]): Promise<number> {
+    const sheet = await this.tab(sheetName);
     try {
       const res = await this.api.spreadsheets.values.append({
         spreadsheetId: this.spreadsheetId,

@@ -2,6 +2,7 @@ import ExcelJS from "exceljs";
 
 import type { Cell, CellWrite, ReadOpts, SheetAdapter, SheetInfo } from "./types";
 import { SheetError } from "./types";
+import { resolveSheetName } from "./names";
 
 type Persist = (bytes: Buffer) => Promise<void>;
 
@@ -50,9 +51,8 @@ export class XlsxAdapter implements SheetAdapter {
   }
 
   private ws(name: string): ExcelJS.Worksheet {
-    const ws = this.wb.getWorksheet(name) ?? this.wb.worksheets.find((w) => w.name.toLowerCase() === name.toLowerCase());
-    if (!ws) throw new SheetError(`There is no sheet called "${name}".`, "not_found");
-    return ws;
+    const real = resolveSheetName(this.wb.worksheets.map((w) => w.name), name);
+    return this.wb.getWorksheet(real) ?? this.wb.worksheets.find((w) => w.name === real)!;
   }
 
   async listSheets(): Promise<SheetInfo[]> {

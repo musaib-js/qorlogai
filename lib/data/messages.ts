@@ -4,9 +4,28 @@ import { db } from "@/lib/db";
 import { exportsTable, messages } from "@/lib/db/schema";
 import { openBytes, openText, sealBytes, sealText } from "@/lib/vault";
 
-export async function saveMessage(userId: string, channel: string, role: "user" | "assistant", text: string) {
-  if (!text.trim()) return;
-  await db().insert(messages).values({ userId, channel, role, contentEnc: await sealText(userId, text.slice(0, 8000)) });
+export interface AttachedFile {
+  id: string;
+  filename: string;
+}
+
+// Files a reply carried are stored as a trailing marker inside the encrypted text, so a download
+// card survives a page reload. No schema change needed.
+const FILE_MARK = /\n?<!--file:([0-9a-f-]{36})\|([^>]*?)-->/g;
+
+export function splitFiles(stored: string): { text: string; files: AttachedFile[] } {
+  const files: AttachedFile[] = [];
+  const text = stored.replace(FILE_MARK, (_m, id: string, filename: string) => {
+    files.push({ id, filename });
+    return "";
+  });
+  return { text: text.trim(), files };
+}
+
+export async function saveMessage(userId: string, channel: string, role: "user" | "assistant", text: string, files: AttachedFile[] = []) {
+  if (!text.trim() && !files.length) return;
+  const marks = files.map((f) => `\n<!--file:${f.id}|${f.filename.replace(/[<>|]/g, "")}-->`).join("");
+  await db().insert(messages).values({ userId, channel, role, contentEnc: await sealText(userId, text.slice(0, 8000) + marks) });
 }
 
 export interface StoredMessage {
@@ -14,6 +33,7 @@ export interface StoredMessage {
   role: "user" | "assistant";
   channel: string;
   text: string;
+  files: AttachedFile[];
   createdAt: Date;
 }
 
@@ -28,7 +48,8 @@ export async function recentMessages(userId: string, limit = 14): Promise<Stored
   const out: StoredMessage[] = [];
   for (const r of rows.reverse()) {
     try {
-      out.push({ id: r.id, role: r.role, channel: r.channel, text: await openText(userId, r.contentEnc), createdAt: r.createdAt });
+      const { text, files } = splitFiles(await openText(userId, r.contentEnc));
+      out.push({ id: r.id, role: r.role, channel: r.channel, text, files, createdAt: r.createdAt });
     } catch {
       /* skip */
     }
@@ -58,7 +79,7 @@ export async function saveExport(userId: string, file: { filename: string; mime:
       filename: file.filename,
       mime: file.mime,
       dataEnc: await sealBytes(userId, file.bytes),
-      expiresAt: new Date(Date.now() + 30 * 60_000),
+      expiresAt: new Date(Date.now() + 24 * 3600_000),
     })
     .returning({ id: exportsTable.id });
   return row.id;

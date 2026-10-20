@@ -17,6 +17,9 @@ export const LAYOUTS = ["row_per_day", "row_per_entry", "grid", "unknown"] as co
 export const ColumnSchema = z.object({
   col: z.number().int().min(1).describe("1-based column number (A=1)"),
   header: z.string(),
+  description: z.string().describe(
+    'One plain sentence on what this column holds, with real example values from the sheet, e.g. "Attendance status per day: Present, Leave, Half Day, Holiday, Weekend"',
+  ),
   meaning: z.enum(COLUMN_MEANINGS).describe(
     "date | hours (numeric hours) | tasks (description of work) | project | notes | leave (leave/status marker) | start_time | end_time | day_of_week | computed (formula/total, never write) | other",
   ),
@@ -43,12 +46,28 @@ export const TimesheetProfileSchema = z.object({
   sheetSelection: z.enum(["single", "tab_per_month", "tab_per_week", "other"]).describe("How entries are spread over tabs"),
   sheets: z.array(SheetProfileSchema),
   leaveConvention: z.string().nullable().describe('How leave is recorded, e.g. "write Leave in the Status column"'),
+  leaveMarkers: z.array(z.object({ text: z.string(), days: z.number() })).describe(
+    "Exact cell texts that mean the person was on leave, with the days each is worth: 1 = full day, 0.5 = half day. Copy the texts exactly as they appear in the sheet. Do NOT include holidays, weekends, week-offs or present/working values.",
+  ),
   warnings: z.array(z.string()),
   confidence: z.enum(["low", "medium", "high"]),
 });
 
-export type SheetProfile = z.infer<typeof SheetProfileSchema>;
-export type TimesheetProfile = z.infer<typeof TimesheetProfileSchema>;
+/** Counted by code over the whole sheet (not by the model), so the chat agent can rely on it. */
+export interface ColumnStat {
+  col: number;
+  filled: number;
+  /** most common values of a categorical column */
+  values?: { value: string; count: number }[];
+  /** numeric columns */
+  min?: number;
+  max?: number;
+}
+
+export type SheetProfile = z.infer<typeof SheetProfileSchema> & { stats?: ColumnStat[]; dataRows?: number };
+export type TimesheetProfile = Omit<z.infer<typeof TimesheetProfileSchema>, "sheets"> & { sheets: SheetProfile[]; version?: number };
+/** Bump when the profile gains information the agent needs; older profiles are re-analysed on use. */
+export const PROFILE_VERSION = 2;
 export type ColumnMeaning = (typeof COLUMN_MEANINGS)[number];
 
 export function colOf(sheet: SheetProfile, meaning: ColumnMeaning): number | null {
@@ -121,7 +140,7 @@ export function heuristicProfile(sheets: { name: string; rows: Cell[][] }[]): Ti
         const formulaSamples = data.slice(0, 8).filter((r) => typeof r[i] === "string" && String(r[i]).startsWith("=")).length;
         let meaning: ColumnMeaning = RULES.find(([, re]) => re.test(h))?.[0] ?? "other";
         if (formulaSamples >= 2) meaning = "computed";
-        return { col: i + 1, header: h, meaning };
+        return { col: i + 1, header: h, meaning, description: `${h} (${meaning.replace("_", " ")})` };
       });
 
     const dateCol = columns.find((c) => c.meaning === "date");
@@ -160,21 +179,53 @@ export function heuristicProfile(sheets: { name: string; rows: Cell[][] }[]): Ti
     sheetSelection,
     sheets: profiles,
     leaveConvention: null,
+    leaveMarkers: [],
     warnings,
     confidence: entry.length ? "medium" : "low",
+    version: PROFILE_VERSION,
   };
+}
+
+/** Looks at every data row (not just the first 30) and summarises each column. */
+export function columnStats(dataRows: Cell[][], columns: SheetProfile["columns"]): ColumnStat[] {
+  return columns.map((c) => {
+    const vals = dataRows.map((r) => r[c.col - 1]).filter((v) => v != null && v !== "");
+    const stat: ColumnStat = { col: c.col, filled: vals.length };
+    if (c.meaning === "date" || c.meaning === "computed" || !vals.length) return stat;
+    const nums = vals.filter((v): v is number => typeof v === "number");
+    if (nums.length === vals.length) {
+      stat.min = Math.min(...nums);
+      stat.max = Math.max(...nums);
+      return stat;
+    }
+    const counts = new Map<string, number>();
+    for (const v of vals) {
+      const t = String(v).replace(/\s+/g, " ").trim().slice(0, 40);
+      counts.set(t, (counts.get(t) ?? 0) + 1);
+    }
+    // free text (tasks, notes) has many distinct values and is not worth listing
+    if (counts.size <= 25 && (counts.size <= vals.length / 2 || counts.size <= 8)) {
+      stat.values = [...counts].map(([value, count]) => ({ value, count })).sort((a, b) => b.count - a.count);
+    }
+    return stat;
+  });
 }
 
 /** Compact text form of a profile for prompts and for showing to users. */
 export function describeProfile(p: TimesheetProfile): string {
   const lines = [`${p.summary} (confidence: ${p.confidence}; mode: ${p.recordsMode}; tabs: ${p.sheetSelection})`];
   for (const s of p.sheets) {
-    const cols = s.columns.map((c) => `${c.col}:${c.header}=${c.meaning}`).join(", ");
     lines.push(
-      `- "${s.name}" [${s.role}, ${s.layout}] header row ${s.headerRow ?? "?"}, data from row ${s.firstDataRow ?? "?"}, dates ${s.dateFormat ?? "?"}${cols ? `; cols ${cols}` : ""}${s.notes ? `; note: ${s.notes}` : ""}`,
+      `- Sheet "${s.name}" [${s.role}, ${s.layout}] header row ${s.headerRow ?? "?"}, data from row ${s.firstDataRow ?? "?"}${s.dataRows != null ? ` (${s.dataRows} rows)` : ""}, dates ${s.dateFormat ?? "?"}${s.notes ? `; note: ${s.notes}` : ""}`,
     );
+    for (const c of s.columns) {
+      const st = s.stats?.find((x) => x.col === c.col);
+      const vals = st?.values ? ` Values: ${st.values.slice(0, 10).map((v) => `${v.value}×${v.count}`).join(", ")}.` : st?.min != null ? ` Range ${st.min}–${st.max}.` : "";
+      lines.push(`    col ${c.col} "${c.header}" = ${c.meaning}: ${c.description ?? ""}${vals}`);
+    }
   }
   if (p.leaveConvention) lines.push(`Leave: ${p.leaveConvention}`);
+  if (p.leaveMarkers?.length) lines.push(`Leave markers (cell text = days): ${p.leaveMarkers.map((m) => `"${m.text}" = ${m.days}`).join(", ")}`);
   for (const w of p.warnings) lines.push(`Warning: ${w}`);
   return lines.join("\n");
 }

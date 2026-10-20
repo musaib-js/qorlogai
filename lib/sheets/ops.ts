@@ -1,6 +1,8 @@
 import { colOf, type SheetProfile, type TimesheetProfile } from "./profile";
 import type { Cell, CellWrite, SheetAdapter } from "./types";
 import { SheetError } from "./types";
+import { classifyLeave } from "./leave";
+import { matchSheetName } from "./names";
 import { formatDate, monthKey, orderFromFormat, parseCellDate, parseMonthFromTabName } from "@/lib/time";
 
 const MAX_SCAN = 800;
@@ -31,6 +33,8 @@ export interface EntryRow {
   project: string | null;
   notes: string | null;
   leave: string | null;
+  /** 0, 0.5 or 1, worked out from the sheet's own leave vocabulary (never from free-text mentions) */
+  leaveDays: number;
 }
 
 export function entrySheets(profile: TimesheetProfile): SheetProfile[] {
@@ -45,8 +49,11 @@ export function entrySheets(profile: TimesheetProfile): SheetProfile[] {
 
 export function pickSheet(profile: TimesheetProfile, date: string, explicit?: string): SheetProfile {
   if (explicit) {
-    const s = profile.sheets.find((x) => x.name.toLowerCase() === explicit.toLowerCase());
-    if (!s) throw new SheetError(`There is no sheet named "${explicit}".`, "not_found");
+    const real = matchSheetName(profile.sheets.map((x) => x.name), explicit);
+    const s = profile.sheets.find((x) => x.name === real);
+    if (!s) {
+      throw new SheetError(`There is no sheet matching "${explicit}". The sheets are: ${profile.sheets.map((x) => `"${x.name}"`).join(", ")}.`, "not_found");
+    }
     return s;
   }
   const sheets = entrySheets(profile);
@@ -270,6 +277,14 @@ export async function readEntries(
     for (const { row, cells } of await scan(adapter, s)) {
       const date = parseCellDate(cells[idx("date")], order);
       if (!date || date < opts.from || date > opts.to) continue;
+      const leaveIdx = idx("leave");
+      const leaveDays =
+        leaveIdx >= 0
+          ? classifyLeave(cells[leaveIdx], { inLeaveColumn: true, markers: profile.leaveMarkers })
+          : Math.max(
+              idx("tasks") >= 0 ? classifyLeave(cells[idx("tasks")], { inLeaveColumn: false }) : 0,
+              idx("notes") >= 0 ? classifyLeave(cells[idx("notes")], { inLeaveColumn: false }) : 0,
+            );
       out.push({
         sheet: s.name,
         row,
@@ -279,6 +294,7 @@ export async function readEntries(
         project: idx("project") >= 0 ? str(cells[idx("project")]) : null,
         notes: idx("notes") >= 0 ? str(cells[idx("notes")]) : null,
         leave: idx("leave") >= 0 ? str(cells[idx("leave")]) : null,
+        leaveDays,
       });
     }
   }

@@ -10,11 +10,14 @@ export const metadata = { title: "Chat" };
 export default async function ChatPage() {
   const user = await requireUser();
   const [history, sheets] = await Promise.all([recentMessages(user.id, 30), listTimesheets(user.id)]);
-  const initialMessages: UIMessage[] = history.map((m) => ({
+  const initialMessages = history.map((m) => ({
     id: m.id,
     role: m.role,
-    parts: [{ type: "text", text: m.text }],
-  }));
+    parts: [
+      ...(m.text ? [{ type: "text" as const, text: m.text }] : []),
+      ...m.files.map((f) => ({ type: "data-file" as const, data: f })),
+    ],
+  })) as UIMessage[];
   return (
     <div className="h-full">
       <Chat initialMessages={initialMessages} firstName={user.name.split(" ")[0]} hasTimesheets={sheets.length > 0} />

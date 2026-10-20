@@ -96,13 +96,101 @@ test("tab-per-month picks the right tab and refuses a missing one", async () => 
 
 test("reports render to xlsx and pdf, including non-latin text", async () => {
   const entries = [
-    { sheet: "s", row: 2, date: "2026-10-20", hours: 8, tasks: "Wrote “spec” — नमस्ते", project: "P", notes: null, leave: null },
-    { sheet: "s", row: 3, date: "2026-10-21", hours: 4, tasks: null, project: null, notes: null, leave: "Half day leave" },
+    { sheet: "s", row: 2, date: "2026-10-20", hours: 8, tasks: "Wrote “spec” — नमस्ते", project: "P", notes: null, leave: null, leaveDays: 0 },
+    { sheet: "s", row: 3, date: "2026-10-21", hours: 4, tasks: null, project: null, notes: null, leave: "Half day leave", leaveDays: 0.5 },
   ];
   const r = { title: "Acme", person: "Musaib", from: "2026-10-01", to: "2026-10-31", entries };
-  assert.deepEqual(totals(entries), { hours: 12, leaveDays: 0.5, days: 2 });
+  const t = totals(entries);
+  assert.equal(t.hours, 12);
+  assert.equal(t.leaveDays, 0.5);
+  assert.equal(t.days, 2);
   const x = await reportXlsx(r);
   const p = await reportPdf(r);
   assert.ok(x.length > 1000);
   assert.equal(p.subarray(0, 4).toString(), "%PDF");
+});
+
+// ---- regressions from real chat failures -------------------------------------------------------
+
+async function novemberBook() {
+  return workbook((wb) => {
+    for (const [tab, m] of [["Oct-26", 10], ["Nov-26", 11]] as const) {
+      const ws = wb.addWorksheet(tab);
+      ws.addRow(["Date", "Day", "Project", "Task Description", "Hours", "Status"]);
+      for (let d = 1; d <= 30; d++) {
+        const dt = new Date(Date.UTC(2026, m - 1, d));
+        const wd = dt.getUTCDay();
+        const status = wd === 0 || wd === 6 ? "Weekend" : d === 9 || d === 18 ? "Leave" : d === 13 ? "Half Day" : d === 5 ? "Holiday" : "Present";
+        const present = status === "Present";
+        // "leave" appears in free text on purpose: it must not be counted as leave
+        ws.addRow([dt, "", present ? "Acme" : "", present ? "Updated the leave policy page" : "", present ? 8 : 0, status]);
+      }
+    }
+  });
+}
+
+test("a tab called Nov-26 is found however the user spells it", async () => {
+  const { matchSheetName } = await import("../lib/sheets/names");
+  const names = ["Oct-26", "Nov-26", "Summary"];
+  for (const q of ["November 26", "nov 2026", "Nov-26", "nov-26", "November", "11/2026", "november 2026 sheet"]) {
+    assert.equal(matchSheetName(names, q), "Nov-26", q);
+  }
+  assert.equal(matchSheetName(names, "Dec 26"), null);
+  const a = await novemberBook();
+  assert.ok((await a.read("November 26", { maxRows: 2 })).length === 2);
+  await assert.rejects(() => a.read("Dec 26"), /sheets in this file are: "Oct-26", "Nov-26"/);
+});
+
+test("leave is counted from the status column, not from the word leave in task text", async () => {
+  const a = await novemberBook();
+  const p = await profileOf(a);
+  const e = await readEntries(a, p, { from: "2026-11-01", to: "2026-11-30" });
+  const t = totals(e);
+  // 9 and 18 Nov are Mondays/Wednesdays (full leave), the 13th a half day. Holiday and weekends are not leave.
+  assert.equal(t.fullLeaveDays, 2);
+  assert.equal(t.halfLeaveDays, 1);
+  assert.equal(t.leaveDays, 2.5);
+});
+
+test("leave classification handles real-world vocabulary", async () => {
+  const { classifyLeave } = await import("../lib/sheets/leave");
+  const col = { inLeaveColumn: true };
+  assert.equal(classifyLeave("Leave", col), 1);
+  assert.equal(classifyLeave("Sick Leave", col), 1);
+  assert.equal(classifyLeave("Half Day", col), 0.5);
+  assert.equal(classifyLeave("Half day leave", col), 0.5);
+  assert.equal(classifyLeave("Holiday", col), 0);
+  assert.equal(classifyLeave("Weekend", col), 0);
+  assert.equal(classifyLeave("Present", col), 0);
+  assert.equal(classifyLeave("WFH", col), 0);
+  assert.equal(classifyLeave("Reviewed leave policy", { inLeaveColumn: false }), 0);
+  assert.equal(classifyLeave("Leave - dentist", { inLeaveColumn: false }), 1);
+  // a sheet that defines its own vocabulary is strict about it
+  const markers = [{ text: "PL", days: 1 }, { text: "HD", days: 0.5 }];
+  assert.equal(classifyLeave("PL", { inLeaveColumn: true, markers }), 1);
+  assert.equal(classifyLeave("Leave", { inLeaveColumn: true, markers }), 0);
+});
+
+test("column statistics list the status values found in the whole sheet", async () => {
+  const { columnStats } = await import("../lib/sheets/profile");
+  const a = await novemberBook();
+  const p = await profileOf(a);
+  const s = p.sheets.find((x) => x.name === "Nov-26")!;
+  const rows = await a.read("Nov-26", { startRow: 2, maxRows: 100, maxCols: 6 });
+  const status = columnStats(rows, s.columns).find((c) => c.col === 6)!;
+  assert.deepEqual(new Set(status.values!.map((v) => v.value)), new Set(["Present", "Weekend", "Leave", "Half Day", "Holiday"]));
+});
+
+test("writes land and can be read back; PDF for a month includes its rows", async () => {
+  const a = await novemberBook();
+  const p = await profileOf(a);
+  await setDayEntry(a, p, { date: "2026-11-03", hours: 6, tasks: [{ description: "Fixed invoice bug" }], sheet: "November 26" });
+  await a.save();
+  const back = await readEntries(a, p, { from: "2026-11-03", to: "2026-11-03", sheet: "Nov-26" });
+  assert.equal(back.length, 1);
+  assert.equal(back[0].hours, 6);
+  assert.match(back[0].tasks ?? "", /Fixed invoice bug/);
+  const all = await readEntries(a, p, { from: "2026-11-01", to: "2026-11-30" });
+  const pdf = await reportPdf({ title: "Acme", person: "M", from: "2026-11-01", to: "2026-11-30", entries: all });
+  assert.equal(pdf.subarray(0, 4).toString(), "%PDF");
 });

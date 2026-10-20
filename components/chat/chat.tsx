@@ -30,6 +30,7 @@ const TOOL_LABELS: Record<string, { running: string; done: string }> = {
   mark_leave: { running: "Marking leave", done: "Leave recorded" },
   export_timesheet: { running: "Preparing your file", done: "File ready" },
   read_entries: { running: "Reading your entries", done: "Entries read" },
+  summarize_period: { running: "Counting", done: "Counted" },
   read_sheet: { running: "Reading the sheet", done: "Sheet read" },
   write_cells: { running: "Writing to the sheet", done: "Sheet updated" },
   get_timesheet_info: { running: "Checking the timesheet layout", done: "Layout checked" },
@@ -52,6 +53,24 @@ type ToolPart = Extract<UIMessage["parts"][number], { type: `tool-${string}` }> 
   errorText?: string;
 };
 
+function FileCard({ id, filename }: { id: string; filename?: string }) {
+  return (
+    <a
+      href={`/api/exports/${id}`}
+      className="my-1 flex w-fit max-w-full items-center gap-3 rounded-xl border bg-card px-3.5 py-2.5 shadow-xs transition-colors hover:bg-accent"
+    >
+      <span className="grid size-9 place-items-center rounded-lg bg-primary/10 text-primary">
+        {filename?.endsWith(".pdf") ? <FileText className="size-4" /> : <FileSpreadsheet className="size-4" />}
+      </span>
+      <span className="min-w-0">
+        <span className="block truncate text-sm font-medium">{filename}</span>
+        <span className="text-xs text-muted-foreground">Click to download</span>
+      </span>
+      <Download className="ml-2 size-4 text-muted-foreground" />
+    </a>
+  );
+}
+
 function ToolChip({ part }: { part: ToolPart }) {
   const name = part.type.replace(/^tool-/, "");
   const label = TOOL_LABELS[name] ?? { running: "Working", done: "Done" };
@@ -60,21 +79,7 @@ function ToolChip({ part }: { part: ToolPart }) {
   const failed = part.state === "output-error" || output?.ok === false;
 
   if (!running && !failed && name === "export_timesheet" && output?.fileId) {
-    return (
-      <a
-        href={`/api/exports/${output.fileId}`}
-        className="my-1 flex w-fit max-w-full items-center gap-3 rounded-xl border bg-card px-3.5 py-2.5 shadow-xs transition-colors hover:bg-accent"
-      >
-        <span className="grid size-9 place-items-center rounded-lg bg-primary/10 text-primary">
-          {output.filename?.endsWith(".pdf") ? <FileText className="size-4" /> : <FileSpreadsheet className="size-4" />}
-        </span>
-        <span className="min-w-0">
-          <span className="block truncate text-sm font-medium">{output.filename}</span>
-          <span className="text-xs text-muted-foreground">Click to download</span>
-        </span>
-        <Download className="ml-2 size-4 text-muted-foreground" />
-      </a>
-    );
+    return <FileCard id={output.fileId} filename={output.filename} />;
   }
 
   return (
@@ -106,6 +111,10 @@ function Message({ message }: { message: UIMessage }) {
         {message.parts.map((part, i) => {
           if (part.type === "text") return part.text ? <Markdown key={i}>{part.text}</Markdown> : null;
           if (isToolUIPart(part)) return <ToolChip key={i} part={part as unknown as ToolPart} />;
+          if (part.type === "data-file") {
+            const f = (part as unknown as { data: { id: string; filename: string } }).data;
+            return <FileCard key={i} id={f.id} filename={f.filename} />;
+          }
           return null;
         })}
       </div>

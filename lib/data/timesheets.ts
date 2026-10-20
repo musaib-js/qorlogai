@@ -97,15 +97,24 @@ export async function loadProfile(userId: string, ts: Timesheet): Promise<Timesh
   return openJson<TimesheetProfile>(userId, ts.profileEnc);
 }
 
-/** One-line-per-timesheet digest used in the agent's system prompt. */
+/**
+ * What the chat agent knows about every timesheet before it does anything: tab names plus the full
+ * column definitions from the analysis, so it never has to guess where things live.
+ */
 export async function timesheetDigest(userId: string): Promise<string> {
   const list = await db().select().from(timesheets).where(eq(timesheets.userId, userId)).orderBy(timesheets.createdAt);
   if (!list.length) return "The user has no timesheets registered yet.";
   const out: string[] = [];
   for (const ts of list) {
     const p = await loadProfile(userId, ts).catch(() => null);
-    const brief = p ? `${p.recordsMode.replace("_", " ")}, ${p.sheetSelection.replace(/_/g, " ")}` : ts.profileStatus;
-    out.push(`- "${ts.name}" (${ts.kind === "gsheet" ? "Google Sheet" : "Excel file"}; ${brief})`);
+    out.push(`## "${ts.name}" (${ts.kind === "gsheet" ? "Google Sheet" : "Excel file"})`);
+    if (!p) {
+      out.push(`Not analysed yet (status: ${ts.profileStatus}). Call reanalyse_timesheet before reading or writing it.`);
+      continue;
+    }
+    out.push(`Tabs: ${p.sheets.map((s) => `"${s.name}"`).join(", ")}`);
+    const text = describeProfile(p);
+    out.push(text.length > 3500 ? `${text.slice(0, 3500)}\n...(use get_timesheet_info for the rest)` : text);
   }
   return out.join("\n");
 }

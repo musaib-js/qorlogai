@@ -2,7 +2,7 @@ import { getExport } from "@/lib/data/messages";
 import { json } from "@/lib/http";
 import { apiUser } from "@/lib/session";
 
-/** Files produced by the chat agent. Only the owner can fetch them, and only for 30 minutes. */
+/** Files produced by the chat agent. Only the owner can fetch them, and only for 24 hours. */
 export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
   const user = await apiUser();
   if (!user) return json({ error: "Unauthorized" }, 401);

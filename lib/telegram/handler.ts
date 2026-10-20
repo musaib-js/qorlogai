@@ -183,10 +183,22 @@ async function onRegistered(msg: TgMessage, chatId: string, user: User) {
   }
   await sendTyping(chatId);
   const { text: reply, files } = await runTurn({ user, channel: "telegram", externalId: chatId, text });
-  await sendMessage(chatId, reply);
+  // Files first: the reply usually says "attached", so the file must actually arrive.
+  const failed: string[] = [];
   for (const f of files) {
-    const file = await getExport(user.id, f.id);
-    if (file) await sendDocument(chatId, file);
+    try {
+      const file = await getExport(user.id, f.id);
+      if (!file) throw new Error("expired");
+      await sendDocument(chatId, file);
+    } catch (e) {
+      console.error("telegram file delivery failed", f.filename, e);
+      failed.push(f.filename);
+    }
+  }
+  await sendMessage(chatId, reply);
+  if (failed.length) {
+    const link = appUrl();
+    await sendMessage(chatId, `I couldn't attach ${failed.join(", ")} here. Please try again, or download it from the web chat${link ? `: ${link}/chat` : "."}`);
   }
 }
 
