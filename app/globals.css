@@ -1,0 +1,137 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@plugin "@tailwindcss/typography";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, monospace;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-border: var(--sidebar-border);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 10px);
+}
+
+:root {
+  --radius: 0.75rem;
+  --background: oklch(0.992 0.002 285);
+  --foreground: oklch(0.19 0.02 285);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.19 0.02 285);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.19 0.02 285);
+  --primary: oklch(0.52 0.22 285);
+  --primary-foreground: oklch(0.985 0.005 285);
+  --secondary: oklch(0.96 0.008 285);
+  --secondary-foreground: oklch(0.25 0.03 285);
+  --muted: oklch(0.96 0.006 285);
+  --muted-foreground: oklch(0.5 0.02 285);
+  --accent: oklch(0.95 0.025 285);
+  --accent-foreground: oklch(0.3 0.12 285);
+  --destructive: oklch(0.577 0.23 27);
+  --border: oklch(0.92 0.008 285);
+  --input: oklch(0.9 0.01 285);
+  --ring: oklch(0.62 0.17 285);
+  --sidebar: oklch(0.975 0.006 285);
+  --sidebar-foreground: oklch(0.25 0.03 285);
+  --sidebar-accent: oklch(0.94 0.02 285);
+  --sidebar-border: oklch(0.92 0.008 285);
+}
+
+.dark {
+  --background: oklch(0.145 0.015 285);
+  --foreground: oklch(0.96 0.005 285);
+  --card: oklch(0.185 0.018 285);
+  --card-foreground: oklch(0.96 0.005 285);
+  --popover: oklch(0.2 0.02 285);
+  --popover-foreground: oklch(0.96 0.005 285);
+  --primary: oklch(0.68 0.19 285);
+  --primary-foreground: oklch(0.15 0.03 285);
+  --secondary: oklch(0.24 0.02 285);
+  --secondary-foreground: oklch(0.96 0.005 285);
+  --muted: oklch(0.23 0.018 285);
+  --muted-foreground: oklch(0.7 0.02 285);
+  --accent: oklch(0.28 0.05 285);
+  --accent-foreground: oklch(0.95 0.02 285);
+  --destructive: oklch(0.7 0.19 22);
+  --border: oklch(1 0 0 / 9%);
+  --input: oklch(1 0 0 / 13%);
+  --ring: oklch(0.6 0.16 285);
+  --sidebar: oklch(0.17 0.016 285);
+  --sidebar-foreground: oklch(0.96 0.005 285);
+  --sidebar-accent: oklch(0.25 0.04 285);
+  --sidebar-border: oklch(1 0 0 / 8%);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "cv11", "ss01";
+  }
+}
+
+/* Signature Qorlog look: a soft violet -> cyan aurora used on hero + AI moments */
+.aurora {
+  background:
+    radial-gradient(60% 50% at 15% 0%, oklch(0.62 0.2 285 / 0.28), transparent 70%),
+    radial-gradient(50% 45% at 90% 10%, oklch(0.75 0.13 210 / 0.22), transparent 70%),
+    radial-gradient(40% 40% at 50% 100%, oklch(0.7 0.18 330 / 0.14), transparent 70%);
+}
+.text-gradient {
+  background-image: linear-gradient(100deg, oklch(0.62 0.22 285), oklch(0.72 0.14 215));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.bg-gradient-brand {
+  background-image: linear-gradient(135deg, oklch(0.55 0.23 285), oklch(0.66 0.16 235));
+}
+
+/* Streaming caret + typing dots for the chat */
+@keyframes qor-dot {
+  0%, 80%, 100% { opacity: 0.25; transform: translateY(0); }
+  40% { opacity: 1; transform: translateY(-2px); }
+}
+.qor-dot { animation: qor-dot 1.2s infinite ease-in-out; }
+.qor-dot:nth-child(2) { animation-delay: 0.15s; }
+.qor-dot:nth-child(3) { animation-delay: 0.3s; }
+
+/* Markdown content inside chat bubbles */
+.qor-prose { @apply prose prose-sm dark:prose-invert max-w-none; }
+.qor-prose :where(p, ul, ol) { margin-top: 0.5em; margin-bottom: 0.5em; }
+.qor-prose :where(h1, h2, h3) { margin-top: 1em; margin-bottom: 0.4em; }
+.qor-prose :where(code):not(pre code) {
+  @apply rounded bg-muted px-1.5 py-0.5 font-mono text-[0.85em] font-medium;
+}
+.qor-prose :where(code)::before, .qor-prose :where(code)::after { content: none; }
+.qor-prose :where(pre) { @apply rounded-xl border bg-muted/60 text-foreground; }
+.qor-prose :where(table) { @apply w-full text-sm; }
+.qor-prose :where(th) { @apply bg-muted/60 px-3 py-1.5 text-left font-medium; }
+.qor-prose :where(td) { @apply border-t px-3 py-1.5; }

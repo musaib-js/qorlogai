@@ -1,0 +1,14 @@
+# Free scheduler for Vercel Hobby (which only allows daily crons). Add repo secrets:
+#   APP_URL      e.g. https://qorlog.vercel.app
+#   CRON_SECRET  same value as the Vercel env var
+# Skip this file if you are on Vercel Pro: vercel.json already schedules the job.
+name: reminders
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - run: curl -fsS --retry 3 -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" "${{ secrets.APP_URL }}/api/cron/reminders"
